@@ -1,0 +1,2102 @@
+name: Build EclipsBoss
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/boss.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Restore Maven cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository
+          key: m2-eclips-boss-${{ github.run_id }}
+          restore-keys: |
+            m2-eclips-boss-
+
+      - name: Generate plugin project
+        run: |
+          set -e
+          mkdir -p eclips-boss/src/main/java/ru/eclips/boss eclips-boss/src/main/resources
+          cat > eclips-boss/pom.xml <<'EOF_POM'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <project xmlns="http://maven.apache.org/POM/4.0.0"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+            <modelVersion>4.0.0</modelVersion>
+
+            <groupId>ru.eclips</groupId>
+            <artifactId>eclips-boss</artifactId>
+            <version>2.4.2</version>
+            <packaging>jar</packaging>
+
+            <properties>
+              <maven.compiler.source>17</maven.compiler.source>
+              <maven.compiler.target>17</maven.compiler.target>
+              <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+            </properties>
+
+            <repositories>
+              <repository>
+                <id>opencollab-repo-release</id>
+                <url>https://repo.opencollab.dev/maven-releases/</url>
+              </repository>
+              <repository>
+                <id>opencollab-repo-snapshot</id>
+                <url>https://repo.opencollab.dev/maven-snapshots/</url>
+                <releases><enabled>false</enabled></releases>
+                <snapshots><enabled>true</enabled></snapshots>
+              </repository>
+              <repository>
+                <id>okaeri-releases</id>
+                <url>https://repo.okaeri.cloud/releases</url>
+              </repository>
+              <repository>
+                <id>porklib-maven</id>
+                <url>https://maven.daporkchop.net/</url>
+              </repository>
+            </repositories>
+
+            <dependencies>
+              <dependency>
+                <groupId>com.nukkit-mot</groupId>
+                <artifactId>nukkit-mot</artifactId>
+                <version>1.26.40-R1</version>
+                <scope>provided</scope>
+              </dependency>
+            </dependencies>
+
+            <build>
+              <finalName>EclipsBoss</finalName>
+              <plugins>
+                <plugin>
+                  <groupId>org.apache.maven.plugins</groupId>
+                  <artifactId>maven-compiler-plugin</artifactId>
+                  <version>3.11.0</version>
+                  <configuration>
+                    <source>17</source>
+                    <target>17</target>
+                    <encoding>UTF-8</encoding>
+                  </configuration>
+                </plugin>
+              </plugins>
+            </build>
+          </project>
+          EOF_POM
+          cat > eclips-boss/src/main/resources/plugin.yml <<'EOF_PLUGIN'
+          name: EclipsBoss
+          main: ru.eclips.boss.EclipsBoss
+          version: 2.4.2
+          api: ["1.0.0"]
+          author: Eclips
+          description: Boss event Lord of Darkness
+          softdepend: [EclipsClips, OrbsTalismans]
+
+          commands:
+            boss:
+              description: Босс-ивент Лорд Тьмы (меню для игроков, подкоманды для админов)
+              usage: /boss
+
+            aboss:
+              description: Админ-меню босс-ивента
+              usage: /aboss
+              permission: eclips.boss.admin
+
+          permissions:
+            eclips.boss.admin:
+              description: Управление босс-ивентом (/aboss и подкоманды /boss)
+              default: op
+          EOF_PLUGIN
+          cat > eclips-boss/src/main/resources/config.yml <<'EOF_CONFIG'
+          # EclipsBoss: босс-ивент «Лорд Тьмы»
+
+          # Часовой пояс расписания и как он называется в тексте для игроков
+          timezone: "Europe/Moscow"
+          timezone-label: "МСК"
+
+          # Во сколько каждый день ОТКРЫВАЕТСЯ телепорт на ивент (строго ЧЧ:ММ, например 09:00 а не 9:00)
+          schedule:
+            - "18:00"
+
+          # За сколько минут до открытия предупредить в чате (0 = не предупреждать)
+          warn-minutes: 5
+
+          # Минимум игроков онлайн, чтобы ивент открылся по расписанию
+          min-players: 1
+
+          event:
+            # Через сколько минут после открытия появляется босс (18:00 -> 18:05)
+            spawn-delay-minutes: 5
+            # Через сколько минут после открытия ивент заканчивается, а живой босс пропадает (18:00 -> 18:30)
+            duration-minutes: 30
+            # Подсказка над хотбаром всем игрокам: «Телепортация к боссу открыта, команда /boss»
+            # Через сколько минут после открытия она появляется (18:00 -> 18:01) и сколько секунд висит
+            hint-after-minutes: 1
+            hint-seconds: 10
+            # Телепорт появляется на таком расстоянии от точки босса
+            teleport-min: 10
+            teleport-max: 15
+            # Если на арене не осталось живых игроков (босс всех убил), через сколько секунд босс пропадает
+            no-players-grace-seconds: 20
+
+          # Где появляется босс. Встань на нужное место в мире ивента и напиши /boss setspawn
+          spawn:
+            world: "world"
+            x: 0.5
+            y: 70.0
+            z: 0.5
+
+          # Зона ивента: в этом радиусе от точки босса нет PvP, а при любой смерти вещи и опыт остаются,
+          # игрок возвращается в точку возврата
+          zone:
+            radius: 500
+            # true = защита работает только пока идёт ивент, false = всегда в этой зоне
+            only-during-event: false
+
+          # Куда возвращать после смерти в зоне. Пусто в world = обычный спавн сервера.
+          # Свою точку можно поставить командой /boss sethome
+          respawn:
+            world: ""
+            x: 0.5
+            y: 70.0
+            z: 0.5
+
+          boss:
+            # Тип моба. Если в ядре такого нет, плагин возьмёт Zombie и напишет предупреждение в консоль
+            mob: "Warden"
+            name: "§4§lЛорд Тьмы"
+            health: 3000
+            # Размер (2.0 = увеличен в 2 раза)
+            scale: 2.0
+            # Если босса утащили дальше этого расстояния от точки появления, он возвращается
+            leash: 60
+            # Как часто босс использует скилл (в ярости вдвое чаще)
+            skill-interval-seconds: 8
+            # Радиус, в котором игроки видят красную полоску босса сверху и сообщения скиллов
+            bar-radius: 150
+            # Урон босса, его скиллов и прислужников по игрокам умножается на это число (1.2 = +20%)
+            damage-multiplier: 1.2
+            # На сколько процентов режется урон от стрел и других снарядов по боссу (70 = урон x0.3)
+            arrow-damage-reduction: 70
+
+          skills:
+            slam:
+              radius: 9
+              damage: 8
+            summon:
+              mob: "Zombie"
+              count: 3
+              max-alive: 6
+              health: 40
+            # Огненный шквал бьёт только цель босса: hits ударов подряд (раз в полсекунды), каждый на damage урона
+            fire:
+              hits: 3
+              damage: 4
+
+          # Регенерация босса на протяжении всего боя
+          regen:
+            # Сколько хп в секунду восстанавливает всегда
+            per-second: 2
+            # Если здоровья меньше этого значения, регенерация усиливается
+            low-hp: 1200
+            # Сколько хп в секунду восстанавливает, когда здоровья меньше low-hp
+            low-per-second: 4
+
+          # Умный босс: выбирает случайную цель, бежит за ней и бьёт точечными атаками (молния, огненный шквал, удары),
+          # общие атаки (удар земли, притягивание, сотрясение, призыв) достаются всем
+          ai:
+            # Сколько секунд бежит за одной целью
+            target-seconds: 30
+            # Если через это время цель жива и у неё меньше finish-hp здоровья (2 HP = 1 сердце), добивает ещё finish-seconds секунд
+            finish-hp: 10
+            finish-seconds: 15
+            # Если цель так и не убита, переключается на игрока с наименьшим здоровьем в этом радиусе (блоков) от босса
+            switch-radius: 10
+            # Скорость бега босса, блоков за тик (игрок идёт ~0.22, бежит ~0.28); в ярости в 1.25 раза быстрее
+            chase-speed: 0.3
+            # На каком расстоянии от цели босс останавливается и бьёт
+            stop-distance: 2.5
+            # Дальность точечных атак (молния, огненный шквал) по цели
+            point-range: 40
+            # true = обычные удары босса достаются только цели, остальных бьют только общие атаки
+            melee-only-target: true
+            # Писать игрокам рядом, кого босс выбрал целью
+            announce: true
+
+          # Фаза 1: у босса меньше phase1.hp здоровья
+          phase1:
+            hp: 1000
+            # Раз в сколько секунд бьёт молнией свою цель (дальность: ai.point-range) и урон
+            lightning-interval-seconds: 10
+            lightning-damage: 10
+            # При переходе призывает стражей (зомби в алмазной броне, Защита 3, незеритовый меч Острота 4)
+            guards: 7
+            guard-health: 60
+            guard-damage: 7
+            # С этой фазы босс неуязвим к стрелам, фаерболам и зарядам вихря
+
+          # Фаза 2: у босса меньше phase2.hp здоровья
+          phase2:
+            hp: 500
+            # Атака подбрасывания: радиус, высота (мин/макс блоков) и урон
+            launch-radius: 15
+            launch-min: 4
+            launch-max: 7
+            launch-damage: 6
+            # При переходе призывает стражей (зомби в незеритовой броне, Защита 4 + Огнеупорность 4, меч Острота 5)
+            guards: 3
+            guard-health: 80
+            guard-damage: 9
+
+          reward:
+            # Всем участникам (кто нанёс боссу не меньше min-damage урона)
+            participant: 50
+            # Бонус за последний удар (добавляется к награде участника)
+            last-hit: 250
+            min-damage: 50
+
+          # Дроп с босса из плагина OrbsTalismans (он уже стоит на сервере)
+          orb:
+            plugin: "OrbsTalismans"
+            # Айди предмета из OrbsTalismans (в твоём orbs.yml «Талисман Лорда» = 8, а 6 = «Талисман дракона»)
+            id: 8
+            chance: 25
+            # Как называется в сообщениях и в информации о боссе
+            display-name: "сферы Лорда"
+
+          # Лог урона и последних ударов (меню /aboss) хранится в boss-log.json
+          log:
+            days: 30
+          EOF_CONFIG
+          cat > eclips-boss/src/main/java/ru/eclips/boss/EclipsBoss.java <<'EOF_JAVA'
+          package ru.eclips.boss;
+
+          import cn.nukkit.Player;
+          import cn.nukkit.block.Block;
+          import cn.nukkit.command.Command;
+          import cn.nukkit.command.CommandSender;
+          import cn.nukkit.entity.Entity;
+          import cn.nukkit.event.EventHandler;
+          import cn.nukkit.event.EventPriority;
+          import cn.nukkit.event.Listener;
+          import cn.nukkit.event.entity.EntityDamageByEntityEvent;
+          import cn.nukkit.event.entity.EntityDamageEvent;
+          import cn.nukkit.event.entity.EntityDeathEvent;
+          import cn.nukkit.event.player.PlayerDeathEvent;
+          import cn.nukkit.event.player.PlayerFormRespondedEvent;
+          import cn.nukkit.event.player.PlayerQuitEvent;
+          import cn.nukkit.event.player.PlayerRespawnEvent;
+          import cn.nukkit.form.element.ElementButton;
+          import cn.nukkit.form.response.FormResponseSimple;
+          import cn.nukkit.form.window.FormWindow;
+          import cn.nukkit.form.window.FormWindowSimple;
+          import cn.nukkit.item.Item;
+          import cn.nukkit.item.enchantment.Enchantment;
+          import cn.nukkit.level.Level;
+          import cn.nukkit.level.Position;
+          import cn.nukkit.math.Vector3;
+          import cn.nukkit.plugin.Plugin;
+          import cn.nukkit.plugin.PluginBase;
+          import cn.nukkit.potion.Effect;
+          import cn.nukkit.scheduler.Task;
+          import com.google.gson.Gson;
+          import com.google.gson.GsonBuilder;
+          import com.google.gson.reflect.TypeToken;
+
+          import java.io.File;
+          import java.io.InputStreamReader;
+          import java.io.OutputStreamWriter;
+          import java.io.Reader;
+          import java.io.Writer;
+          import java.lang.reflect.Method;
+          import java.nio.charset.StandardCharsets;
+          import java.nio.file.Files;
+          import java.time.Instant;
+          import java.time.Duration;
+          import java.time.LocalTime;
+          import java.time.ZoneId;
+          import java.time.ZonedDateTime;
+          import java.time.format.DateTimeFormatter;
+          import java.util.ArrayList;
+          import java.util.Collections;
+          import java.util.HashMap;
+          import java.util.HashSet;
+          import java.util.IdentityHashMap;
+          import java.util.Iterator;
+          import java.util.LinkedHashMap;
+          import java.util.List;
+          import java.util.Map;
+          import java.util.Random;
+          import java.util.Set;
+          import java.util.UUID;
+
+          public class EclipsBoss extends PluginBase implements Listener {
+
+              private static final String PREFIX = "§6[Eclips] §f";
+              private static final DateTimeFormatter HHMM = DateTimeFormatter.ofPattern("HH:mm");
+
+              private static final int PHASE_IDLE = 0;
+              private static final int PHASE_OPEN = 1;
+              private static final int PHASE_FIGHT = 2;
+
+              private static final class BarRef {
+                  Player player;
+                  Object bar;
+                  long id;
+              }
+
+              private static final class Rec {
+                  long time;
+                  boolean killed;
+                  String lastHitter;
+                  Map<String, Double> damage = new LinkedHashMap<>();
+              }
+
+              private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
+              private final List<Rec> log = new ArrayList<>();
+              private File logFile;
+              private final Random rnd = new Random();
+              private final Map<String, Double> damage = new LinkedHashMap<>();
+              private final List<Entity> minions = new ArrayList<>();
+              private final Set<Long> minionIds = new HashSet<>();
+              private final Set<String> fired = new HashSet<>();
+              private final Set<UUID> sendHome = new HashSet<>();
+              private final Map<UUID, BarRef> bars = new HashMap<>();
+              private final Map<FormWindow, Integer> forms = Collections.synchronizedMap(new IdentityHashMap<>());
+
+              private ZoneId zone = ZoneId.of("Europe/Moscow");
+              private int phase = PHASE_IDLE;
+              private Entity boss;
+              private boolean rage;
+              private boolean hadPlayers;
+              private boolean barFailed;
+              private long startMs;
+              private long emptySince;
+              private int skillTimer;
+              private int lightningTimer;
+              private boolean stage1;
+              private boolean stage2;
+              private boolean equipWarned;
+              private int ticks;
+              private String lastHitter;
+
+              // smart AI state
+              private Player target;
+              private boolean finishing;
+              private long targetUntil;
+              private boolean haveLast;
+              private boolean hintFailed;
+              private boolean moveErrLogged;
+              private double lastX;
+              private double lastY;
+              private double lastZ;
+              private double ownMX;
+              private double ownMZ;
+              private double homeX;
+              private double homeZ;
+              private double leashR = 60;
+
+              // ------------------------------------------------------------------ lifecycle
+
+              @Override
+              public void onEnable() {
+                  saveDefaultConfig();
+                  loadSettings();
+                  logFile = new File(getDataFolder(), "boss-log.json");
+                  loadLog();
+                  getServer().getPluginManager().registerEvents(this, this);
+                  getServer().getScheduler().scheduleRepeatingTask(this, new Task() {
+                      @Override
+                      public void onRun(int currentTick) {
+                          try {
+                              tick();
+                          } catch (Throwable t) {
+                              getLogger().error("Boss tick error: " + t);
+                              t.printStackTrace();
+                          }
+                      }
+                  }, 10);
+                  // fast task (every tick): chase the target and cancel any knockback of the boss
+                  getServer().getScheduler().scheduleRepeatingTask(this, new Task() {
+                      @Override
+                      public void onRun(int currentTick) {
+                          try {
+                              moveTick();
+                          } catch (Throwable t) {
+                              if (!moveErrLogged) {
+                                  moveErrLogged = true;
+                                  getLogger().error("Boss move error: " + t);
+                                  t.printStackTrace();
+                              }
+                          }
+                      }
+                  }, 1);
+                  getLogger().info("EclipsBoss enabled");
+              }
+
+              @Override
+              public void onDisable() {
+                  if (phase != PHASE_IDLE) {
+                      phase = PHASE_IDLE;
+                      removeBoss();
+                  }
+                  hideAllBars();
+              }
+
+              private void loadSettings() {
+                  try {
+                      zone = ZoneId.of(getConfig().getString("timezone", "Europe/Moscow"));
+                  } catch (Exception e) {
+                      zone = ZoneId.of("Europe/Moscow");
+                      getLogger().warning("Bad timezone in config, using Europe/Moscow");
+                  }
+              }
+
+              // ------------------------------------------------------------------ main loop
+
+              private void tick() {
+                  ticks++;
+                  if (ticks % 2 == 0) {
+                      checkSchedule();
+                  }
+                  if (phase != PHASE_IDLE) {
+                      eventTick();
+                  }
+              }
+
+              private void checkSchedule() {
+                  ZonedDateTime now = ZonedDateTime.now(zone);
+                  String cur = now.format(HHMM);
+                  String day = now.toLocalDate().toString();
+                  int warn = getConfig().getInt("warn-minutes", 5);
+                  for (String s : getConfig().getStringList("schedule")) {
+                      LocalTime t;
+                      try {
+                          t = LocalTime.parse(s.trim());
+                      } catch (Exception e) {
+                          continue;
+                      }
+                      String start = t.format(HHMM);
+                      String w = t.minusMinutes(warn).format(HHMM);
+                      if (warn > 0 && cur.equals(w) && fired.add(day + "|w|" + start)) {
+                          getServer().broadcastMessage(PREFIX + "§eЧерез " + warn + " мин. откроется телепорт на ивент с боссом §cЛорд Тьмы§e! Команда: §d/boss");
+                      }
+                      if (cur.equals(start) && fired.add(day + "|s|" + start)) {
+                          if (getServer().getOnlinePlayers().size() >= getConfig().getInt("min-players", 1)) {
+                              openEvent(false);
+                          }
+                      }
+                  }
+                  if (fired.size() > 300) {
+                      fired.clear();
+                  }
+              }
+
+              private void eventTick() {
+                  long el = System.currentTimeMillis() - startMs;
+                  long durationMs = getConfig().getInt("event.duration-minutes", 30) * 60000L;
+                  long delayMs = getConfig().getInt("event.spawn-delay-minutes", 5) * 60000L;
+
+                  if (el >= durationMs) {
+                      if (phase == PHASE_FIGHT) {
+                          cancelEvent("§cВремя вышло: Лорд Тьмы исчез, его не успели победить.");
+                      } else {
+                          phase = PHASE_IDLE;
+                          getServer().broadcastMessage(PREFIX + "§7Ивент завершён.");
+                      }
+                      return;
+                  }
+                  if (phase == PHASE_OPEN && el >= delayMs) {
+                      if (!spawnBoss()) {
+                          phase = PHASE_IDLE;
+                      }
+                      return;
+                  }
+                  if (phase == PHASE_OPEN) {
+                      long hintStart = getConfig().getInt("event.hint-after-minutes", 1) * 60000L;
+                      long hintLen = getConfig().getInt("event.hint-seconds", 10) * 1000L;
+                      if (el >= hintStart && el < hintStart + hintLen) {
+                          // popup fades fast, so it is refreshed every tick of this task (0.5 s)
+                          for (Player p : getServer().getOnlinePlayers().values()) {
+                              p.sendPopup("§fТелепортация к боссу открыта, команда §d/boss");
+                          }
+                      }
+                  }
+                  if (phase == PHASE_FIGHT) {
+                      bossTick();
+                  }
+              }
+
+              // ------------------------------------------------------------------ event lifecycle
+
+              private boolean openEvent(boolean spawnNow) {
+                  if (phase != PHASE_IDLE) {
+                      return false;
+                  }
+                  if (spawnLevel() == null) {
+                      getLogger().error("Event world not found: " + getConfig().getString("spawn.world", "world"));
+                      return false;
+                  }
+                  phase = PHASE_OPEN;
+                  startMs = System.currentTimeMillis();
+                  int delay = getConfig().getInt("event.spawn-delay-minutes", 5);
+                  getServer().broadcastMessage(PREFIX + "§a§lТелепорт на ивент открыт! §fНапиши §d/boss §fи нажми «Телепортация на ивент».");
+                  if (spawnNow) {
+                      return spawnBoss() || resetIdle();
+                  }
+                  getServer().broadcastMessage(PREFIX + "§eБосс §cЛорд Тьмы §eпоявится через " + delay + " мин.");
+                  return true;
+              }
+
+              private boolean resetIdle() {
+                  phase = PHASE_IDLE;
+                  return false;
+              }
+
+              private boolean spawnBoss() {
+                  Level level = spawnLevel();
+                  if (level == null) {
+                      getLogger().error("Event world not found");
+                      return false;
+                  }
+                  double x = getConfig().getDouble("spawn.x", 0.5);
+                  double y = getConfig().getDouble("spawn.y", 70);
+                  double z = getConfig().getDouble("spawn.z", 0.5);
+                  level.loadChunk(((int) Math.floor(x)) >> 4, ((int) Math.floor(z)) >> 4);
+                  Position pos = new Position(x, y, z, level);
+
+                  String mob = getConfig().getString("boss.mob", "Warden");
+                  Entity e = Entity.createEntity(mob, pos);
+                  if (e == null) {
+                      getLogger().warning("Mob type '" + mob + "' is not available in this server core, using Zombie instead");
+                      e = Entity.createEntity("Zombie", pos);
+                  }
+                  if (e == null) {
+                      getLogger().error("Cannot create boss entity");
+                      return false;
+                  }
+                  int hp = getConfig().getInt("boss.health", 3000);
+                  e.setMaxHealth(hp);
+                  e.setHealth(hp);
+                  e.setScale((float) getConfig().getDouble("boss.scale", 2.0));
+                  e.setNameTag(getConfig().getString("boss.name", "§4§lЛорд Тьмы"));
+                  e.setNameTagVisible(true);
+                  e.setNameTagAlwaysVisible(true);
+                  e.addEffect(Effect.getEffect(Effect.FIRE_RESISTANCE).setDuration(20 * 60 * 120).setVisible(false));
+                  e.spawnToAll();
+
+                  boss = e;
+                  phase = PHASE_FIGHT;
+                  rage = false;
+                  stage1 = false;
+                  stage2 = false;
+                  lightningTimer = 0;
+                  hadPlayers = false;
+                  emptySince = 0;
+                  lastHitter = null;
+                  target = null;
+                  finishing = false;
+                  targetUntil = 0;
+                  haveLast = false;
+                  ownMX = 0;
+                  ownMZ = 0;
+                  homeX = x;
+                  homeZ = z;
+                  leashR = getConfig().getDouble("boss.leash", 60);
+                  damage.clear();
+                  minions.clear();
+                  minionIds.clear();
+                  skillTimer = getConfig().getInt("boss.skill-interval-seconds", 8) * 20;
+
+                  getServer().broadcastMessage(PREFIX + "§c§l☠ Появился босс: §r" + getConfig().getString("boss.name", "BOSS") + "§f!");
+                  getServer().broadcastMessage(PREFIX + "§7Телепортация на ивент закрыта.");
+                  return true;
+              }
+
+              private void bossTick() {
+                  if (boss == null || boss.isClosed() || !boss.isAlive()) {
+                      if (boss != null && boss.getHealth() <= 0) {
+                          victory();
+                      } else {
+                          cancelEvent("§cБосс исчез...");
+                      }
+                      return;
+                  }
+
+                  // everyone who came to the event is dead or gone -> boss leaves
+                  int alive = zoneAlive();
+                  if (alive > 0) {
+                      hadPlayers = true;
+                      emptySince = 0;
+                  } else if (hadPlayers) {
+                      if (emptySince == 0) {
+                          emptySince = System.currentTimeMillis();
+                      } else if (System.currentTimeMillis() - emptySince >= getConfig().getInt("event.no-players-grace-seconds", 20) * 1000L) {
+                          cancelEvent("§cЛорд Тьмы одолел всех игроков и исчез во тьме.");
+                          return;
+                      }
+                  }
+
+                  Level lv = spawnLevel();
+                  double sx = getConfig().getDouble("spawn.x", 0.5);
+                  double sy = getConfig().getDouble("spawn.y", 70);
+                  double sz = getConfig().getDouble("spawn.z", 0.5);
+                  double dx = boss.x - sx;
+                  double dz = boss.z - sz;
+                  if (boss.getLevel() != lv || Math.sqrt(dx * dx + dz * dz) > getConfig().getDouble("boss.leash", 60)) {
+                      boss.teleport(new Vector3(sx, sy, sz));
+                      haveLast = false;
+                  }
+
+                  int max = boss.getMaxHealth();
+                  float hp = boss.getHealth();
+
+                  // regeneration during the whole fight (this task runs every 0.5 s)
+                  if (hp > 0 && hp < max) {
+                      double rps = hp < getConfig().getDouble("regen.low-hp", 1200)
+                              ? getConfig().getDouble("regen.low-per-second", 4)
+                              : getConfig().getDouble("regen.per-second", 2);
+                      float nh = Math.min((float) max, hp + (float) (rps * 0.5));
+                      if (nh > hp) {
+                          boss.setHealth(nh);
+                          hp = nh;
+                      }
+                  }
+
+                  // whole fight: immune to poison and burning
+                  boss.removeEffect(Effect.POISON);
+                  boss.removeEffect(Effect.WITHER);
+                  if (boss.isOnFire()) {
+                      boss.extinguish();
+                  }
+
+                  int p1 = getConfig().getInt("phase1.hp", 1000);
+                  int p2 = getConfig().getInt("phase2.hp", 500);
+                  if (hp < p1) {
+                      if (!stage1) {
+                          stage1 = true;
+                          lightningTimer = getConfig().getInt("phase1.lightning-interval-seconds", 10) * 20;
+                          tellNear("§4§l☠ Лорд Тьмы в ярости! §cОн призывает стражей и больше не боится стрел и огненных шаров!");
+                          spawnGuards(getConfig().getInt("phase1.guards", 7), false, "phase1");
+                      }
+                      lightningTimer -= 10;
+                      if (lightningTimer <= 0) {
+                          lightningTimer = getConfig().getInt("phase1.lightning-interval-seconds", 10) * 20;
+                          lightningStrike();
+                      }
+                  }
+                  if (hp < p2 && hp > 0) {
+                      if (!stage2) {
+                          stage2 = true;
+                          tellNear("§4§l☠ Лорд Тьмы на грани! §cОн восстанавливает силы и призывает незеритовых стражей!");
+                          spawnGuards(getConfig().getInt("phase2.guards", 3), true, "phase2");
+                      }
+                  }
+
+                  if (!rage && hp < max * 0.3) {
+                      rage = true;
+                      boss.addEffect(Effect.getEffect(Effect.SPEED).setAmplifier(1).setDuration(20 * 60 * 120).setVisible(false));
+                      tellNear("§4§lЛОРД ТЬМЫ В ЯРОСТИ! §cОн стал быстрее и чаще использует скиллы!");
+                  }
+
+                  updateBars(hp, max);
+                  updateTarget();
+
+                  skillTimer -= 10;
+                  if (skillTimer <= 0) {
+                      int interval = getConfig().getInt("boss.skill-interval-seconds", 8) * 20;
+                      skillTimer = rage ? Math.max(40, interval / 2) : interval;
+                      castSkill();
+                  }
+              }
+
+              private void victory() {
+                  if (phase != PHASE_FIGHT) {
+                      return;
+                  }
+                  phase = PHASE_IDLE;
+                  hideAllBars();
+                  recordEvent(true);
+                  Position pos = new Position(boss.x, boss.y, boss.z, boss.getLevel());
+
+                  List<Map.Entry<String, Double>> list = new ArrayList<>(damage.entrySet());
+                  list.sort((a, b) -> Double.compare(b.getValue(), a.getValue()));
+
+                  int partReward = getConfig().getInt("reward.participant", 50);
+                  int lastReward = getConfig().getInt("reward.last-hit", 250);
+                  double minDamage = getConfig().getDouble("reward.min-damage", 50);
+
+                  Map<String, Integer> totals = new LinkedHashMap<>();
+                  for (Map.Entry<String, Double> en : list) {
+                      if (en.getValue() >= minDamage) {
+                          totals.put(en.getKey(), partReward);
+                      }
+                  }
+                  if (lastHitter != null) {
+                      totals.put(lastHitter, totals.getOrDefault(lastHitter, 0) + lastReward);
+                  }
+
+                  getServer().broadcastMessage(PREFIX + "§a§lЛорд Тьмы повержен!");
+                  if (lastHitter != null) {
+                      getServer().broadcastMessage(PREFIX + "§eПоследний удар: §f" + lastHitter);
+                  }
+                  if (!list.isEmpty()) {
+                      getServer().broadcastMessage(PREFIX + "§6Топ урона:");
+                      for (int i = 0; i < Math.min(3, list.size()); i++) {
+                          getServer().broadcastMessage("§e" + (i + 1) + ". §f" + list.get(i).getKey()
+                                  + " §7— §c" + (int) (double) list.get(i).getValue());
+                      }
+                  }
+
+                  for (Map.Entry<String, Integer> en : totals.entrySet()) {
+                      boolean ok = giveClips(en.getKey(), en.getValue());
+                      Player p = getServer().getPlayerExact(en.getKey());
+                      if (p != null) {
+                          p.sendMessage(PREFIX + (ok ? "§aНаграда за босса: §f+" + en.getValue() + " клипсов"
+                                  : "§cНе удалось выдать награду, напиши администратору."));
+                      }
+                  }
+
+                  if (rnd.nextDouble() * 100.0 < getConfig().getDouble("orb.chance", 25)) {
+                      Item orb = makeOrb();
+                      if (orb != null) {
+                          pos.getLevel().dropItem(new Vector3(pos.x, pos.y + 1, pos.z), orb);
+                          getServer().broadcastMessage(PREFIX + "§6§lС Лорда Тьмы выпала "
+                                  + getConfig().getString("orb.display-name", "сфера Лорда") + "! §fКто подберёт, тот и владеет.");
+                      } else {
+                          getLogger().error("Orb drop failed: item could not be created (check orb.plugin and orb.id)");
+                      }
+                  }
+
+                  closeMinions();
+                  boss = null;
+              }
+
+              private void cancelEvent(String msg) {
+                  if (phase == PHASE_IDLE) {
+                      return;
+                  }
+                  boolean wasFight = phase == PHASE_FIGHT;
+                  phase = PHASE_IDLE;
+                  hideAllBars();
+                  if (wasFight) {
+                      recordEvent(false);
+                  }
+                  removeBoss();
+                  if (msg != null) {
+                      getServer().broadcastMessage(PREFIX + msg);
+                  }
+              }
+
+              private void removeBoss() {
+                  if (boss != null && !boss.isClosed()) {
+                      boss.close();
+                  }
+                  boss = null;
+                  closeMinions();
+              }
+
+              private void closeMinions() {
+                  for (Entity m : minions) {
+                      if (m != null && !m.isClosed()) {
+                          m.close();
+                      }
+                  }
+                  minions.clear();
+                  minionIds.clear();
+              }
+
+              // ------------------------------------------------------------------ rewards
+
+              private boolean giveClips(String name, int amount) {
+                  try {
+                      Plugin pl = getServer().getPluginManager().getPlugin("EclipsClips");
+                      if (pl != null && pl.isEnabled()) {
+                          Method m = pl.getClass().getMethod("addClips", String.class, long.class);
+                          Object r = m.invoke(pl, name, (long) amount);
+                          if (r instanceof Boolean && (Boolean) r) {
+                              return true;
+                          }
+                      }
+                  } catch (Throwable t) {
+                      getLogger().warning("EclipsClips API failed, trying command: " + t);
+                  }
+                  try {
+                      getServer().dispatchCommand(getServer().getConsoleSender(), "givec give \"" + name + "\" " + amount);
+                      return true;
+                  } catch (Throwable t) {
+                      getLogger().error("Cannot give clips to " + name + ": " + t);
+                      return false;
+                  }
+              }
+
+              private Item makeOrb() {
+                  int id = getConfig().getInt("orb.id", 8);
+                  try {
+                      Plugin pl = getServer().getPluginManager().getPlugin(getConfig().getString("orb.plugin", "OrbsTalismans"));
+                      if (pl != null) {
+                          Method m = pl.getClass().getDeclaredMethod("make", int.class);
+                          m.setAccessible(true);
+                          Object o = m.invoke(null, id);
+                          if (o instanceof Item) {
+                              return (Item) o;
+                          }
+                      } else {
+                          getLogger().error("Orbs plugin not found: " + getConfig().getString("orb.plugin", "OrbsTalismans"));
+                      }
+                  } catch (Throwable t) {
+                      getLogger().error("Orb creation failed: " + t);
+                  }
+                  return null;
+              }
+
+              // ------------------------------------------------------------------ boss bar (top of the screen)
+
+              private void updateBars(float hp, int max) {
+                  double r = getConfig().getDouble("boss.bar-radius", 150);
+                  float pct = Math.max(1f, hp / (float) max * 100f);
+                  String text = getConfig().getString("boss.name", "§4§lЛорд Тьмы") + " §f" + (int) hp + "§7/§f" + max;
+
+                  Set<UUID> keep = new HashSet<>();
+                  for (Player p : near(r)) {
+                      keep.add(p.getUniqueId());
+                      showBar(p, text, pct);
+                  }
+                  Iterator<Map.Entry<UUID, BarRef>> it = bars.entrySet().iterator();
+                  while (it.hasNext()) {
+                      Map.Entry<UUID, BarRef> en = it.next();
+                      if (!keep.contains(en.getKey())) {
+                          destroyBar(en.getValue());
+                          it.remove();
+                      }
+                  }
+              }
+
+              private void showBar(Player p, String text, float pct) {
+                  if (barFailed) {
+                      p.sendPopup(text);
+                      return;
+                  }
+                  try {
+                      BarRef ref = bars.get(p.getUniqueId());
+                      if (ref == null) {
+                          Class<?> barClass = Class.forName("cn.nukkit.utils.DummyBossBar");
+                          Class<?> builderClass = Class.forName("cn.nukkit.utils.DummyBossBar$Builder");
+                          Object builder = builderClass.getConstructor(Player.class).newInstance(p);
+                          builderClass.getMethod("text", String.class).invoke(builder, text);
+                          builderClass.getMethod("length", float.class).invoke(builder, pct);
+                          tryRed(builder, "color");
+                          Object bar = builderClass.getMethod("build").invoke(builder);
+                          Object id = Player.class.getMethod("createBossBar", barClass).invoke(p, bar);
+                          ref = new BarRef();
+                          ref.player = p;
+                          ref.bar = bar;
+                          ref.id = id instanceof Number ? ((Number) id).longValue() : 0L;
+                          bars.put(p.getUniqueId(), ref);
+                      } else {
+                          ref.bar.getClass().getMethod("setText", String.class).invoke(ref.bar, text);
+                          ref.bar.getClass().getMethod("setLength", float.class).invoke(ref.bar, pct);
+                      }
+                  } catch (Throwable t) {
+                      barFailed = true;
+                      getLogger().error("Boss bar API failed, using popup instead: " + t);
+                      if (t.getCause() != null) {
+                          getLogger().error("Cause: " + t.getCause());
+                      }
+                  }
+              }
+
+              private void tryRed(Object target, String methodName) {
+                  for (Method m : target.getClass().getMethods()) {
+                      if (!m.getName().equals(methodName)) {
+                          continue;
+                      }
+                      Class<?>[] t = m.getParameterTypes();
+                      try {
+                          if (t.length == 3 && t[0] == float.class) {
+                              m.invoke(target, 1f, 0f, 0f);
+                              return;
+                          }
+                          if (t.length == 3 && t[0] == int.class) {
+                              m.invoke(target, 255, 0, 0);
+                              return;
+                          }
+                          if (t.length == 1 && t[0].isEnum()) {
+                              for (Object c : t[0].getEnumConstants()) {
+                                  if (c.toString().equalsIgnoreCase("RED")) {
+                                      m.invoke(target, c);
+                                      return;
+                                  }
+                              }
+                          }
+                          if (t.length == 1) {
+                              Object col = t[0].getConstructor(int.class, int.class, int.class).newInstance(255, 0, 0);
+                              m.invoke(target, col);
+                              return;
+                          }
+                      } catch (Throwable ignored) {
+                          // try next overload
+                      }
+                  }
+              }
+
+              private void destroyBar(BarRef ref) {
+                  try {
+                      if (ref != null && ref.player != null) {
+                          Player.class.getMethod("removeBossBar", long.class).invoke(ref.player, ref.id);
+                      }
+                  } catch (Throwable ignored) {
+                      // player may be gone already
+                  }
+              }
+
+              private void hideAllBars() {
+                  for (BarRef ref : bars.values()) {
+                      destroyBar(ref);
+                  }
+                  bars.clear();
+              }
+
+              // ------------------------------------------------------------------ skills
+
+              private void castSkill() {
+                  List<Player> near = near(getConfig().getDouble("boss.bar-radius", 150));
+                  if (near.isEmpty()) {
+                      return;
+                  }
+                  boolean low = boss != null && boss.getHealth() < getConfig().getInt("phase2.hp", 500);
+                  int n = rnd.nextInt(low ? 6 : 4);
+                  if (n == 0) {
+                      slam();
+                  } else if (n == 1) {
+                      summon();
+                  } else if (n == 2) {
+                      fireStorm(near);
+                  } else if (n == 3) {
+                      pull(near);
+                  } else {
+                      launch();
+                  }
+              }
+
+              private void slam() {
+                  final double radius = getConfig().getDouble("skills.slam.radius", 9);
+                  final float dmg = (float) getConfig().getDouble("skills.slam.damage", 8);
+                  tellNear("§c§l⚠ Лорд Тьмы замахивается! §eОтбегите от него!");
+                  getServer().getScheduler().scheduleDelayedTask(this, new Task() {
+                      @Override
+                      public void onRun(int currentTick) {
+                          if (phase != PHASE_FIGHT || boss == null) {
+                              return;
+                          }
+                          for (Player p : near(radius)) {
+                              hurt(p, dmg);
+                              knock(p, 1.2, 0.9, false);
+                          }
+                          tellNear("§c§lУдар земли!");
+                      }
+                  }, 30);
+              }
+
+              private void summon() {
+                  Iterator<Entity> it = minions.iterator();
+                  while (it.hasNext()) {
+                      Entity m = it.next();
+                      if (m == null || m.isClosed() || !m.isAlive()) {
+                          it.remove();
+                      }
+                  }
+                  int maxAlive = getConfig().getInt("skills.summon.max-alive", 6);
+                  int count = getConfig().getInt("skills.summon.count", 3);
+                  int mhp = getConfig().getInt("skills.summon.health", 40);
+                  String mob = getConfig().getString("skills.summon.mob", "Zombie");
+                  boolean any = false;
+                  for (int i = 0; i < count && minions.size() < maxAlive; i++) {
+                      double ox = (rnd.nextDouble() - 0.5) * 8;
+                      double oz = (rnd.nextDouble() - 0.5) * 8;
+                      Entity m = Entity.createEntity(mob, new Position(boss.x + ox, boss.y, boss.z + oz, boss.getLevel()));
+                      if (m == null) {
+                          continue;
+                      }
+                      m.setMaxHealth(mhp);
+                      m.setHealth(mhp);
+                      m.setNameTag("§cПрислужник тьмы");
+                      m.setNameTagVisible(true);
+                      m.addEffect(Effect.getEffect(Effect.FIRE_RESISTANCE).setDuration(20 * 60 * 30).setVisible(false));
+                      m.spawnToAll();
+                      minions.add(m);
+                      minionIds.add(m.getId());
+                      any = true;
+                  }
+                  if (any) {
+                      tellNear("§5§lЛорд Тьмы призывает прислужников!");
+                  }
+              }
+
+              // point attack: only the boss target, several hits in a row
+              private void fireStorm(List<Player> near) {
+                  final Player t = pointTarget();
+                  if (t == null) {
+                      return;
+                  }
+                  final float dmg = (float) getConfig().getDouble("skills.fire.damage", 4);
+                  int hits = Math.max(1, getConfig().getInt("skills.fire.hits", 3));
+                  tellNear("§6§lОгненный шквал по §f" + t.getName() + "§6§l!");
+                  for (int i = 0; i < hits; i++) {
+                      getServer().getScheduler().scheduleDelayedTask(this, new Task() {
+                          @Override
+                          public void onRun(int currentTick) {
+                              if (phase != PHASE_FIGHT || boss == null || !validTarget(t)) {
+                                  return;
+                              }
+                              hurt(t, dmg);
+                              t.setOnFire(4);
+                          }
+                      }, 1 + i * 10);
+                  }
+              }
+
+              private void pull(List<Player> near) {
+                  tellNear("§5§lЛорд Тьмы притягивает вас к себе!");
+                  for (Player p : near) {
+                      if (p.distance(boss) > 6) {
+                          knock(p, 1.4, 0.45, true);
+                      }
+                  }
+              }
+
+              // ------------------------------------------------------------------ phase skills
+
+              private void lightningStrike() {
+                  float dmg = (float) getConfig().getDouble("phase1.lightning-damage", 10);
+                  Player t = pointTarget();
+                  if (t == null) {
+                      return;
+                  }
+                  try {
+                      Entity bolt = Entity.createEntity("Lightning", new Position(t.x, t.y, t.z, t.getLevel()));
+                      if (bolt != null) {
+                          bolt.spawnToAll();
+                      }
+                  } catch (Throwable ex) {
+                      getLogger().warning("Lightning entity failed: " + ex);
+                  }
+                  hurt(t, dmg);
+                  t.setOnFire(3);
+                  tellNear("§e§l⚡ Лорд Тьмы бьёт молнией в §f" + t.getName() + "§e!");
+              }
+
+              private void launch() {
+                  final double radius = getConfig().getDouble("phase2.launch-radius", 15);
+                  final double hmin = getConfig().getDouble("phase2.launch-min", 4);
+                  final double hmax = Math.max(hmin, getConfig().getDouble("phase2.launch-max", 7));
+                  final float dmg = (float) getConfig().getDouble("phase2.launch-damage", 6);
+                  tellNear("§c§l⚠ Лорд Тьмы собирает силу! §eСейчас он подбросит всех!");
+                  getServer().getScheduler().scheduleDelayedTask(this, new Task() {
+                      @Override
+                      public void onRun(int currentTick) {
+                          if (phase != PHASE_FIGHT || boss == null) {
+                              return;
+                          }
+                          for (Player p : near(radius)) {
+                              double h = hmin + rnd.nextDouble() * (hmax - hmin);
+                              // start speed for a jump of h blocks (gravity 0.08, drag compensated)
+                              double v = Math.sqrt(0.16 * h) * 1.12;
+                              p.setMotion(new Vector3(0, v, 0));
+                              hurt(p, dmg);
+                          }
+                          tellNear("§c§lСотрясение!");
+                      }
+                  }, 20);
+              }
+
+              private Item makeItem(String name, int fallbackId) {
+                  Item it = null;
+                  try {
+                      it = Item.fromString(name);
+                  } catch (Throwable ignored) {
+                      // try the numeric id below
+                  }
+                  if (it == null || it.getId() == 0) {
+                      it = Item.get(fallbackId);
+                  }
+                  return it;
+              }
+
+              private Item ench(Item it, int id, int level) {
+                  try {
+                      Enchantment e = Enchantment.getEnchantment(id);
+                      if (e != null) {
+                          e.setLevel(level, false);
+                          it.addEnchantment(e);
+                      }
+                  } catch (Throwable ex) {
+                      getLogger().warning("Enchantment " + id + " failed: " + ex);
+                  }
+                  return it;
+              }
+
+              private boolean tryItem(Object target, String method, Item it) {
+                  if (target == null || it == null) {
+                      return false;
+                  }
+                  for (Method m : target.getClass().getMethods()) {
+                      if (!m.getName().equals(method) || m.getParameterCount() != 1
+                              || !m.getParameterTypes()[0].isAssignableFrom(Item.class)) {
+                          continue;
+                      }
+                      try {
+                          Object r = m.invoke(target, it);
+                          return !(r instanceof Boolean) || (Boolean) r;
+                      } catch (Throwable ignored) {
+                          // try next overload
+                      }
+                  }
+                  return false;
+              }
+
+              // guards: zombies with armor and a sword, no loot (see onDeath), named like normal minions
+              private void spawnGuards(int count, boolean netherite, String cfg) {
+                  int hp = getConfig().getInt(cfg + ".guard-health", 60);
+                  int dmg = getConfig().getInt(cfg + ".guard-damage", 7);
+                  String[] armorNames = netherite
+                          ? new String[]{"netherite_helmet", "netherite_chestplate", "netherite_leggings", "netherite_boots"}
+                          : new String[]{"diamond_helmet", "diamond_chestplate", "diamond_leggings", "diamond_boots"};
+                  int[] armorIds = netherite ? new int[]{748, 749, 750, 751} : new int[]{310, 311, 312, 313};
+                  String[] setters = {"setHelmet", "setChestplate", "setLeggings", "setBoots"};
+                  for (int i = 0; i < count; i++) {
+                      double ang = rnd.nextDouble() * Math.PI * 2;
+                      double r = 4 + rnd.nextDouble() * 4;
+                      Entity m = Entity.createEntity("Zombie", new Position(boss.x + Math.cos(ang) * r, boss.y, boss.z + Math.sin(ang) * r, boss.getLevel()));
+                      if (m == null) {
+                          continue;
+                      }
+                      m.setMaxHealth(hp);
+                      m.setHealth(hp);
+                      m.setNameTag("§cПрислужник тьмы");
+                      m.setNameTagVisible(true);
+                      m.addEffect(Effect.getEffect(Effect.FIRE_RESISTANCE).setDuration(20 * 60 * 30).setVisible(false));
+
+                      Object inv = null;
+                      try {
+                          inv = m.getClass().getMethod("getInventory").invoke(m);
+                      } catch (Throwable ignored) {
+                          // no inventory on this mob type
+                      }
+                      boolean any = false;
+                      for (int k = 0; k < 4; k++) {
+                          Item a = makeItem(armorNames[k], armorIds[k]);
+                          if (netherite) {
+                              ench(a, 0, 4);
+                              ench(a, 1, 4);
+                          } else {
+                              ench(a, 0, 3);
+                          }
+                          any |= tryItem(m, setters[k], a) || tryItem(inv, setters[k], a);
+                      }
+                      Item sword = makeItem(netherite ? "netherite_sword" : "netherite_sword", 743);
+                      ench(sword, 9, netherite ? 5 : 4);
+                      any |= tryItem(m, "setItemInHand", sword) || tryItem(inv, "setItemInHand", sword);
+                      if (!any && !equipWarned) {
+                          equipWarned = true;
+                          getLogger().warning("Guard zombies: this core has no equipment API for the mob, armor and sword are not shown");
+                      }
+                      try {
+                          m.getClass().getMethod("setDamage", int[].class).invoke(m, new Object[]{new int[]{0, dmg, dmg, dmg}});
+                      } catch (Throwable ignored) {
+                          // damage stays default
+                      }
+                      m.spawnToAll();
+                      minions.add(m);
+                      minionIds.add(m.getId());
+                  }
+              }
+
+              // ------------------------------------------------------------------ smart AI
+
+              private boolean validTarget(Player p) {
+                  return p != null && boss != null && p.isOnline() && p.isAlive() && !p.isSpectator() && !p.isCreative()
+                          && p.getLevel() == boss.getLevel();
+              }
+
+              private List<Player> candidates() {
+                  List<Player> list = new ArrayList<>();
+                  for (Player p : near(getConfig().getDouble("boss.bar-radius", 150))) {
+                      if (validTarget(p)) {
+                          list.add(p);
+                      }
+                  }
+                  return list;
+              }
+
+              // the target of point attacks, or null if it is too far away
+              private Player pointTarget() {
+                  if (!validTarget(target)) {
+                      return null;
+                  }
+                  return target.distance(boss) <= getConfig().getDouble("ai.point-range", 40) ? target : null;
+              }
+
+              // called every 0.5 s: keeps, finishes or changes the target
+              private void updateTarget() {
+                  long now = System.currentTimeMillis();
+                  if (!validTarget(target)) {
+                      pickTarget(null, false);
+                  } else if (now >= targetUntil) {
+                      if (!finishing && target.getHealth() < getConfig().getDouble("ai.finish-hp", 10)) {
+                          finishing = true;
+                          targetUntil = now + getConfig().getInt("ai.finish-seconds", 15) * 1000L;
+                      } else {
+                          pickTarget(target, true);
+                      }
+                  }
+                  if (target != null) {
+                      hintTarget(target);
+                  }
+              }
+
+              // weakest = the player with the lowest health within ai.switch-radius (else a random other player)
+              private void pickTarget(Player old, boolean weakest) {
+                  List<Player> all = candidates();
+                  all.remove(old);
+                  Player next = null;
+                  if (!all.isEmpty()) {
+                      if (weakest) {
+                          double r = getConfig().getDouble("ai.switch-radius", 10);
+                          float best = Float.MAX_VALUE;
+                          for (Player p : all) {
+                              if (p.distance(boss) <= r && p.getHealth() < best) {
+                                  best = p.getHealth();
+                                  next = p;
+                              }
+                          }
+                      }
+                      if (next == null) {
+                          next = all.get(rnd.nextInt(all.size()));
+                      }
+                  }
+                  if (next == null && validTarget(old)) {
+                      next = old; // nobody else, keep chasing the same player
+                  }
+                  finishing = false;
+                  if (next == null) {
+                      target = null;
+                      return;
+                  }
+                  target = next;
+                  targetUntil = System.currentTimeMillis() + getConfig().getInt("ai.target-seconds", 30) * 1000L;
+                  if (getConfig().getBoolean("ai.announce", true)) {
+                      tellNear("§4§lЛорд Тьмы выбрал цель: §f" + next.getName());
+                      next.sendPopup("§c§lТы цель Лорда Тьмы!");
+                  }
+              }
+
+              // tells the core's own mob AI to go for the same target (best effort, the boss also moves by itself, see moveTick)
+              private void hintTarget(Player t) {
+                  if (hintFailed || boss == null || t == null) {
+                      return;
+                  }
+                  boolean ok = false;
+                  try {
+                      Object storage = null;
+                      try {
+                          storage = boss.getClass().getMethod("getMemoryStorage").invoke(boss);
+                      } catch (Throwable ignored) {
+                          // try the behavior group below
+                      }
+                      if (storage == null) {
+                          try {
+                              Object g = boss.getClass().getMethod("getBehaviorGroup").invoke(boss);
+                              if (g != null) {
+                                  storage = g.getClass().getMethod("getMemoryStorage").invoke(g);
+                              }
+                          } catch (Throwable ignored) {
+                              // no behavior group
+                          }
+                      }
+                      if (storage != null) {
+                          Class<?> types = Class.forName("cn.nukkit.entity.ai.memory.CoreMemoryTypes");
+                          Object type = types.getField("ATTACK_TARGET").get(null);
+                          for (Method m : storage.getClass().getMethods()) {
+                              if (m.getName().equals("put") && m.getParameterCount() == 2) {
+                                  m.setAccessible(true);
+                                  m.invoke(storage, type, t);
+                                  ok = true;
+                                  break;
+                              }
+                          }
+                      }
+                  } catch (Throwable ignored) {
+                      // fall through to the old API
+                  }
+                  if (!ok) {
+                      for (Method m : boss.getClass().getMethods()) {
+                          if (m.getName().equals("setTarget") && m.getParameterCount() == 1
+                                  && m.getParameterTypes()[0].isAssignableFrom(Player.class)) {
+                              try {
+                                  m.invoke(boss, t);
+                                  ok = true;
+                                  break;
+                              } catch (Throwable ignored) {
+                                  // try next overload
+                              }
+                          }
+                      }
+                  }
+                  if (!ok) {
+                      hintFailed = true;
+                      getLogger().info("Core mob AI target API not found, the boss chases the target by plugin movement only");
+                  }
+              }
+
+              // every tick: undo any knockback and run to the target
+              private void moveTick() {
+                  if (phase != PHASE_FIGHT || boss == null || boss.isClosed() || !boss.isAlive() || boss.getLevel() == null) {
+                      haveLast = false;
+                      return;
+                  }
+                  double speed = getConfig().getDouble("ai.chase-speed", 0.3) * (rage ? 1.25 : 1.0);
+
+                  // no negative effects at all (slowness, weakness, blindness, poison...)
+                  for (Effect ef : new ArrayList<>(boss.getEffects().values())) {
+                      if (ef.isBad()) {
+                          boss.removeEffect(ef.getId());
+                      }
+                  }
+
+                  // 1) NO knockback of any kind (wind charge, explosion, hits): if the boss was pushed, put it back
+                  if (haveLast) {
+                      double ex = lastX + ownMX;
+                      double ez = lastZ + ownMZ;
+                      double ddx = boss.x - ex;
+                      double ddz = boss.z - ez;
+                      double tol = 0.9 + speed;
+                      if (ddx * ddx + ddz * ddz > tol * tol || boss.y - lastY > 0.8) {
+                          boss.teleport(new Vector3(ex, Math.min(boss.y, lastY), ez));
+                      }
+                  }
+
+                  // 2) run to the target
+                  double mx = 0;
+                  double mz = 0;
+                  double ux = 0;
+                  double uz = 0;
+                  if (validTarget(target)) {
+                      double dx = target.x - boss.x;
+                      double dz = target.z - boss.z;
+                      double d = Math.sqrt(dx * dx + dz * dz);
+                      if (d > 0.01) {
+                          boss.yaw = Math.toDegrees(Math.atan2(dz, dx)) - 90;
+                          ux = dx / d;
+                          uz = dz / d;
+                      }
+                      if (d > getConfig().getDouble("ai.stop-distance", 2.5)) {
+                          mx = ux * speed;
+                          mz = uz * speed;
+                          // do not run out of the leash radius
+                          double hx = boss.x - homeX;
+                          double hz = boss.z - homeZ;
+                          if (Math.sqrt(hx * hx + hz * hz) > leashR - 3 && hx * ux + hz * uz > 0) {
+                              mx = 0;
+                              mz = 0;
+                          }
+                      }
+                  }
+
+                  double my = boss.getMotion().y;
+                  if (my > 0.7) {
+                      my = 0; // upward push
+                  }
+                  if ((mx != 0 || mz != 0) && boss.isOnGround()) {
+                      Block ahead = boss.getLevel().getBlock(new Vector3(Math.floor(boss.x + ux * 2.0), Math.floor(boss.y), Math.floor(boss.z + uz * 2.0)));
+                      if (ahead != null && ahead.isSolid()) {
+                          my = 0.6; // jump over the block in front
+                      }
+                  }
+                  boss.setMotion(new Vector3(mx, my, mz));
+                  ownMX = mx;
+                  ownMZ = mz;
+                  lastX = boss.x;
+                  lastY = boss.y;
+                  lastZ = boss.z;
+                  haveLast = true;
+              }
+
+              // ------------------------------------------------------------------ helpers
+
+              private Level spawnLevel() {
+                  return getServer().getLevelByName(getConfig().getString("spawn.world", "world"));
+              }
+
+              private boolean inZone(Player p) {
+                  if (getConfig().getBoolean("zone.only-during-event", false) && phase == PHASE_IDLE) {
+                      return false;
+                  }
+                  Level lv = spawnLevel();
+                  if (lv == null || p.getLevel() != lv) {
+                      return false;
+                  }
+                  double dx = p.x - getConfig().getDouble("spawn.x", 0.5);
+                  double dz = p.z - getConfig().getDouble("spawn.z", 0.5);
+                  double r = getConfig().getDouble("zone.radius", 500);
+                  return dx * dx + dz * dz <= r * r;
+              }
+
+              private int zoneAlive() {
+                  int n = 0;
+                  for (Player p : getServer().getOnlinePlayers().values()) {
+                      if (p.isAlive() && !p.isSpectator() && inZone(p)) {
+                          n++;
+                      }
+                  }
+                  return n;
+              }
+
+              private List<Player> near(double r) {
+                  List<Player> list = new ArrayList<>();
+                  if (boss == null || boss.getLevel() == null) {
+                      return list;
+                  }
+                  for (Player p : boss.getLevel().getPlayers().values()) {
+                      if (p.isAlive() && p.distance(boss) <= r) {
+                          list.add(p);
+                      }
+                  }
+                  return list;
+              }
+
+              private void tellNear(String msg) {
+                  for (Player p : near(getConfig().getDouble("boss.bar-radius", 150))) {
+                      p.sendMessage(msg);
+                  }
+              }
+
+              private void hurt(Player p, float dmg) {
+                  if (p.isCreative() || p.isSpectator()) {
+                      return;
+                  }
+                  p.attack(new EntityDamageEvent(p, EntityDamageEvent.DamageCause.CUSTOM,
+                          dmg * (float) getConfig().getDouble("boss.damage-multiplier", 1.2)));
+              }
+
+              private void knock(Player p, double power, double up, boolean toward) {
+                  double dx = p.x - boss.x;
+                  double dz = p.z - boss.z;
+                  double len = Math.sqrt(dx * dx + dz * dz);
+                  if (len < 0.01) {
+                      dx = 1;
+                      dz = 0;
+                      len = 1;
+                  }
+                  double s = (toward ? -1 : 1) * power / len;
+                  p.setMotion(new Vector3(dx * s, up, dz * s));
+              }
+
+              private Position homePosition() {
+                  String wn = getConfig().getString("respawn.world", "");
+                  if (wn != null && !wn.isEmpty()) {
+                      Level lv = getServer().getLevelByName(wn);
+                      if (lv != null) {
+                          return new Position(getConfig().getDouble("respawn.x", 0.5),
+                                  getConfig().getDouble("respawn.y", 70),
+                                  getConfig().getDouble("respawn.z", 0.5), lv);
+                      }
+                  }
+                  Level def = getServer().getDefaultLevel();
+                  return def == null ? null : def.getSafeSpawn();
+              }
+
+              private String nextOpenText() {
+                  ZonedDateTime now = ZonedDateTime.now(zone);
+                  LocalTime best = null;
+                  long bestMin = Long.MAX_VALUE;
+                  for (String s : getConfig().getStringList("schedule")) {
+                      try {
+                          LocalTime t = LocalTime.parse(s.trim());
+                          long m = Duration.between(now.toLocalTime(), t).toMinutes();
+                          if (m < 0) {
+                              m += 1440;
+                          }
+                          if (m < bestMin) {
+                              bestMin = m;
+                              best = t;
+                          }
+                      } catch (Exception ignored) {
+                          // skip bad entry
+                      }
+                  }
+                  String label = getConfig().getString("timezone-label", "МСК");
+                  return best == null ? "по расписанию" : best.format(HHMM) + " по " + label;
+              }
+
+              private String infoText() {
+                  String label = getConfig().getString("timezone-label", "МСК");
+                  int delay = getConfig().getInt("event.spawn-delay-minutes", 5);
+                  int dur = getConfig().getInt("event.duration-minutes", 30);
+                  StringBuilder times = new StringBuilder();
+                  LocalTime first = null;
+                  for (String s : getConfig().getStringList("schedule")) {
+                      try {
+                          LocalTime t = LocalTime.parse(s.trim());
+                          if (first == null) {
+                              first = t;
+                          }
+                          if (times.length() > 0) {
+                              times.append(", ");
+                          }
+                          times.append(t.format(HHMM));
+                      } catch (Exception ignored) {
+                          // skip bad entry
+                      }
+                  }
+                  String open = first == null ? "?" : first.format(HHMM);
+                  String spawn = first == null ? "?" : first.plusMinutes(delay).format(HHMM);
+                  String end = first == null ? "?" : first.plusMinutes(dur).format(HHMM);
+                  return "§c§lЛорд Тьмы\n\n"
+                          + "§eКогда: §fкаждый день в " + times + " по " + label + ". Телепортация открыта с " + open + " до " + spawn
+                          + ", в " + spawn + " появляется босс и телепортация закрывается.\n\n"
+                          + "§eНаграда: §fкаждый участник получает " + getConfig().getInt("reward.participant", 50)
+                          + " клипсов, а кто нанёс последний удар, получает ещё " + getConfig().getInt("reward.last-hit", 250)
+                          + ". Есть " + getConfig().getInt("orb.chance", 25) + "% шанс дропа "
+                          + getConfig().getString("orb.display-name", "сферы Лорда") + ", кто подобрал, тот её и получит.\n\n"
+                          + "§eПравила: §fна ивенте PvP между игроками отключено. При смерти на ивенте ваши вещи не выпадают.\n\n"
+                          + "§eКонец: §fесли к " + end + " босс жив или убил всех игроков, он пропадает сам.";
+              }
+
+              // ------------------------------------------------------------------ player menu
+
+              private void openMenu(Player p) {
+                  FormWindowSimple w = new FormWindowSimple("Лорд Тьмы", "Босс-ивент Eclips");
+                  w.addButton(new ElementButton("Информация о боссе"));
+                  w.addButton(new ElementButton("Телепортация на ивент"));
+                  forms.put(w, 1);
+                  p.showFormWindow(w);
+              }
+
+              private void openInfo(Player p) {
+                  FormWindowSimple w = new FormWindowSimple("Лорд Тьмы: информация", infoText());
+                  w.addButton(new ElementButton("Назад"));
+                  forms.put(w, 2);
+                  p.showFormWindow(w);
+              }
+
+              @EventHandler
+              public void onForm(PlayerFormRespondedEvent e) {
+                  Integer kind = forms.remove(e.getWindow());
+                  if (kind == null) {
+                      return;
+                  }
+                  Player p = e.getPlayer();
+                  if (e.wasClosed() || !(e.getResponse() instanceof FormResponseSimple)) {
+                      return;
+                  }
+                  int id = ((FormResponseSimple) e.getResponse()).getClickedButtonId();
+                  if (kind == 1) {
+                      if (id == 0) {
+                          openInfo(p);
+                      } else {
+                          teleportToEvent(p);
+                      }
+                  } else if (kind == 2) {
+                      openMenu(p);
+                  } else if (p.hasPermission("eclips.boss.admin")) {
+                      if (kind == 10) {
+                          adminAction(p, id);
+                      } else if (kind == 11 || kind == 12) {
+                          openAdminMenu(p);
+                      }
+                  }
+              }
+
+              private void teleportToEvent(Player p) {
+                  if (phase == PHASE_FIGHT) {
+                      p.sendMessage(PREFIX + "§cТелепортация закрыта: босс уже появился.");
+                      return;
+                  }
+                  if (phase == PHASE_IDLE) {
+                      p.sendMessage(PREFIX + "§cСейчас ивента нет. Следующий: §f" + nextOpenText() + "§c.");
+                      return;
+                  }
+                  Level lv = spawnLevel();
+                  if (lv == null) {
+                      p.sendMessage(PREFIX + "§cМир ивента не найден, сообщи администратору.");
+                      return;
+                  }
+                  double min = getConfig().getDouble("event.teleport-min", 10);
+                  double max = Math.max(min, getConfig().getDouble("event.teleport-max", 15));
+                  double ang = rnd.nextDouble() * Math.PI * 2;
+                  double r = min + rnd.nextDouble() * (max - min);
+                  double x = getConfig().getDouble("spawn.x", 0.5) + Math.cos(ang) * r;
+                  double z = getConfig().getDouble("spawn.z", 0.5) + Math.sin(ang) * r;
+                  double y = getConfig().getDouble("spawn.y", 70);
+                  lv.loadChunk(((int) Math.floor(x)) >> 4, ((int) Math.floor(z)) >> 4);
+                  Position dest = new Position(x, y, z, lv);
+                  p.teleport(dest);
+                  p.sendMessage(PREFIX + "§aТы на ивенте. Удачи в бою!");
+              }
+
+              // ------------------------------------------------------------------ events
+
+              // protection: no PvP in the event zone, boss immune to environment
+              @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+              public void onDamage(EntityDamageEvent e) {
+                  // boss melee hits only its target (area skills hit everyone)
+                  if (phase == PHASE_FIGHT && boss != null && e instanceof EntityDamageByEntityEvent && e.getEntity() instanceof Player
+                          && ((EntityDamageByEntityEvent) e).getDamager() == boss
+                          && getConfig().getBoolean("ai.melee-only-target", true)
+                          && validTarget(target) && e.getEntity() != target) {
+                      e.setCancelled(true);
+                      return;
+                  }
+                  // boss and its minions hit harder
+                  if (phase == PHASE_FIGHT && e instanceof EntityDamageByEntityEvent && e.getEntity() instanceof Player) {
+                      Entity dm = ((EntityDamageByEntityEvent) e).getDamager();
+                      if (dm != null && (dm == boss || minionIds.contains(dm.getId()))) {
+                          e.setDamage(e.getDamage() * (float) getConfig().getDouble("boss.damage-multiplier", 1.2));
+                      }
+                  }
+                  if (e instanceof EntityDamageByEntityEvent && e.getEntity() instanceof Player) {
+                      Entity d = ((EntityDamageByEntityEvent) e).getDamager();
+                      if (d instanceof Player && inZone((Player) e.getEntity())) {
+                          e.setCancelled(true);
+                          return;
+                      }
+                  }
+                  if (phase != PHASE_FIGHT || boss == null || e.getEntity() != boss) {
+                      return;
+                  }
+                  EntityDamageEvent.DamageCause c = e.getCause();
+                  String cname = c.name();
+                  if (c == EntityDamageEvent.DamageCause.FIRE || c == EntityDamageEvent.DamageCause.FIRE_TICK
+                          || c == EntityDamageEvent.DamageCause.LAVA || c == EntityDamageEvent.DamageCause.DROWNING
+                          || c == EntityDamageEvent.DamageCause.SUFFOCATION || c == EntityDamageEvent.DamageCause.FALL
+                          || cname.equals("LIGHTNING")) {
+                      e.setCancelled(true);
+                      return;
+                  }
+                  // poison and wither
+                  if (cname.equals("MAGIC") && (boss.hasEffect(Effect.POISON) || boss.hasEffect(Effect.WITHER))) {
+                      boss.removeEffect(Effect.POISON);
+                      boss.removeEffect(Effect.WITHER);
+                      e.setCancelled(true);
+                      return;
+                  }
+                  // whole fight: no knockback
+                  if (e instanceof EntityDamageByEntityEvent) {
+                      ((EntityDamageByEntityEvent) e).setKnockBack(0f);
+                  }
+                  // arrows and other projectiles deal much less damage
+                  if (cname.equals("PROJECTILE")) {
+                      double cut = Math.max(0, Math.min(100, getConfig().getDouble("boss.arrow-damage-reduction", 70)));
+                      e.setDamage(e.getDamage() * (float) ((100 - cut) / 100.0));
+                  }
+                  // below phase1.hp: arrows, fireballs and wind charges do nothing
+                  if (boss.getHealth() < getConfig().getInt("phase1.hp", 1000)) {
+                      boolean block = cname.equals("PROJECTILE");
+                      if (e instanceof EntityDamageByEntityEvent) {
+                          block |= isImmuneSource(((EntityDamageByEntityEvent) e).getDamager());
+                      }
+                      try {
+                          Object child = e.getClass().getMethod("getChild").invoke(e);
+                          block |= child instanceof Entity && isImmuneSource((Entity) child);
+                      } catch (Throwable ignored) {
+                          // not a projectile event
+                      }
+                      if (block) {
+                          e.setCancelled(true);
+                      }
+                  }
+              }
+
+              private boolean isImmuneSource(Entity d) {
+                  if (d == null) {
+                      return false;
+                  }
+                  String n = d.getClass().getSimpleName().toLowerCase();
+                  return n.contains("arrow") || n.contains("fireball") || n.contains("wind");
+              }
+
+              // damage tracking, after other plugins changed the damage
+              @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+              public void onDamageRecord(EntityDamageEvent e) {
+                  if (phase != PHASE_FIGHT || boss == null || e.getEntity() != boss) {
+                      return;
+                  }
+                  if (e instanceof EntityDamageByEntityEvent) {
+                      Entity d = ((EntityDamageByEntityEvent) e).getDamager();
+                      if (d instanceof Player) {
+                          Player p = (Player) d;
+                          damage.merge(p.getName(), (double) e.getFinalDamage(), Double::sum);
+                          lastHitter = p.getName();
+                      }
+                  }
+              }
+
+              @EventHandler(priority = EventPriority.HIGHEST)
+              public void onDeath(EntityDeathEvent e) {
+                  Entity en = e.getEntity();
+                  if (minionIds.remove(en.getId())) {
+                      e.setDrops(new Item[0]);
+                      return;
+                  }
+                  if (phase == PHASE_FIGHT && boss != null && en == boss) {
+                      e.setDrops(new Item[0]);
+                      victory();
+                  }
+              }
+
+              // inside the zone: items and XP are kept on ANY death (kill, poison, mobs), player returns to spawn
+              @EventHandler(priority = EventPriority.HIGHEST)
+              public void onPlayerDeath(PlayerDeathEvent e) {
+                  if (!(e.getEntity() instanceof Player)) {
+                      return;
+                  }
+                  Player p = (Player) e.getEntity();
+                  if (!inZone(p)) {
+                      return;
+                  }
+                  e.setKeepInventory(true);
+                  e.setKeepExperience(true);
+                  sendHome.add(p.getUniqueId());
+              }
+
+              @EventHandler(priority = EventPriority.HIGHEST)
+              public void onRespawn(PlayerRespawnEvent e) {
+                  Player p = e.getPlayer();
+                  if (!sendHome.remove(p.getUniqueId())) {
+                      return;
+                  }
+                  Position home = homePosition();
+                  if (home != null) {
+                      e.setRespawnPosition(home);
+                  }
+              }
+
+              @EventHandler
+              public void onQuit(PlayerQuitEvent e) {
+                  UUID id = e.getPlayer().getUniqueId();
+                  BarRef ref = bars.remove(id);
+                  if (ref != null) {
+                      destroyBar(ref);
+                  }
+              }
+
+              // ------------------------------------------------------------------ admin menu (/aboss)
+
+              private void savePoint(Player p, String key) {
+                  getConfig().set(key + ".world", p.getLevel().getFolderName());
+                  getConfig().set(key + ".x", Math.round(p.x * 10) / 10.0);
+                  getConfig().set(key + ".y", Math.round(p.y * 10) / 10.0);
+                  getConfig().set(key + ".z", Math.round(p.z * 10) / 10.0);
+                  getConfig().save();
+              }
+
+              private void openAdminMenu(Player p) {
+                  String state = phase == PHASE_FIGHT ? "босс на арене" : (phase == PHASE_OPEN ? "телепорт открыт" : "ивента нет");
+                  FormWindowSimple w = new FormWindowSimple("Админ: Лорд Тьмы", "Сейчас: " + state);
+                  w.addButton(new ElementButton("Установить место спавна босса (где я стою)"));
+                  w.addButton(new ElementButton("Начать ивент сейчас"));
+                  w.addButton(new ElementButton("Заспавнить босса сейчас (телепорт закроется)"));
+                  w.addButton(new ElementButton("Убить босса сейчас"));
+                  w.addButton(new ElementButton("Лог урона за 30 дней"));
+                  w.addButton(new ElementButton("Лог последних ударов за 30 дней"));
+                  forms.put(w, 10);
+                  p.showFormWindow(w);
+              }
+
+              private void adminAction(Player p, int id) {
+                  switch (id) {
+                      case 0:
+                          savePoint(p, "spawn");
+                          p.sendMessage(PREFIX + "§aТочка появления босса сохранена: §f" + p.getLevel().getFolderName() + " "
+                                  + (int) p.x + " " + (int) p.y + " " + (int) p.z);
+                          break;
+                      case 1:
+                          if (openEvent(false)) {
+                              p.sendMessage(PREFIX + "§aИвент начат: телепорт открыт, босс появится через "
+                                      + getConfig().getInt("event.spawn-delay-minutes", 5) + " мин.");
+                          } else {
+                              p.sendMessage(PREFIX + "§cНе удалось начать (ивент уже идёт или в конфиге нет мира ивента).");
+                          }
+                          break;
+                      case 2:
+                          if (phase == PHASE_FIGHT) {
+                              p.sendMessage(PREFIX + "§cБосс уже на арене.");
+                          } else if (spawnNow()) {
+                              p.sendMessage(PREFIX + "§aБосс заспавнен, телепортация закрыта.");
+                          } else {
+                              p.sendMessage(PREFIX + "§cНе удалось заспавнить босса (смотри консоль).");
+                          }
+                          break;
+                      case 3:
+                          if (phase != PHASE_FIGHT || boss == null) {
+                              p.sendMessage(PREFIX + "§cСейчас босса нет.");
+                          } else {
+                              killBoss(p);
+                          }
+                          break;
+                      case 4:
+                          openLog(p, 11, "Лог урона за " + logDays() + " дней", damageLogText());
+                          break;
+                      case 5:
+                          openLog(p, 12, "Лог последних ударов за " + logDays() + " дней", lastHitLogText());
+                          break;
+                      default:
+                          break;
+                  }
+              }
+
+              private boolean spawnNow() {
+                  if (phase == PHASE_FIGHT) {
+                      return false;
+                  }
+                  if (phase == PHASE_IDLE) {
+                      phase = PHASE_OPEN;
+                      startMs = System.currentTimeMillis();
+                  }
+                  if (spawnBoss()) {
+                      return true;
+                  }
+                  phase = PHASE_IDLE;
+                  return false;
+              }
+
+              // the last hit is counted for the admin who pressed the button
+              private void killBoss(Player admin) {
+                  Entity b = boss;
+                  lastHitter = admin.getName();
+                  try {
+                      b.kill();
+                  } catch (Throwable t) {
+                      getLogger().error("boss.kill failed: " + t);
+                  }
+                  if (phase == PHASE_FIGHT) {
+                      victory();
+                      if (b != null && !b.isClosed()) {
+                          b.close();
+                      }
+                  }
+              }
+
+              private void openLog(Player p, int kind, String title, String text) {
+                  FormWindowSimple w = new FormWindowSimple(title, text);
+                  w.addButton(new ElementButton("Назад"));
+                  forms.put(w, kind);
+                  p.showFormWindow(w);
+              }
+
+              // ------------------------------------------------------------------ logs (stored in boss-log.json)
+
+              private int logDays() {
+                  return Math.max(1, getConfig().getInt("log.days", 30));
+              }
+
+              private void loadLog() {
+                  log.clear();
+                  if (logFile == null || !logFile.exists()) {
+                      return;
+                  }
+                  try (Reader r = new InputStreamReader(Files.newInputStream(logFile.toPath()), StandardCharsets.UTF_8)) {
+                      List<Rec> l = gson.fromJson(r, new TypeToken<List<Rec>>() {
+                      }.getType());
+                      if (l != null) {
+                          log.addAll(l);
+                      }
+                  } catch (Exception ex) {
+                      getLogger().error("Cannot read boss-log.json: " + ex);
+                  }
+              }
+
+              private void saveLog() {
+                  long cutoff = System.currentTimeMillis() - logDays() * 86400000L;
+                  log.removeIf(r -> r.time < cutoff);
+                  try {
+                      getDataFolder().mkdirs();
+                      try (Writer w = new OutputStreamWriter(Files.newOutputStream(logFile.toPath()), StandardCharsets.UTF_8)) {
+                          gson.toJson(log, w);
+                      }
+                  } catch (Exception ex) {
+                      getLogger().error("Cannot save boss-log.json: " + ex);
+                  }
+              }
+
+              private void recordEvent(boolean killed) {
+                  if (damage.isEmpty() && !killed) {
+                      return;
+                  }
+                  Rec r = new Rec();
+                  r.time = System.currentTimeMillis();
+                  r.killed = killed;
+                  r.lastHitter = killed ? lastHitter : null;
+                  r.damage = new LinkedHashMap<>(damage);
+                  log.add(r);
+                  saveLog();
+              }
+
+              private String fmtTime(long ms) {
+                  return ZonedDateTime.ofInstant(Instant.ofEpochMilli(ms), zone).format(DateTimeFormatter.ofPattern("dd.MM HH:mm"));
+              }
+
+              private String damageLogText() {
+                  long cutoff = System.currentTimeMillis() - logDays() * 86400000L;
+                  Map<String, Double> sum = new LinkedHashMap<>();
+                  Map<String, String> display = new HashMap<>();
+                  int events = 0;
+                  for (Rec r : log) {
+                      if (r.time < cutoff) {
+                          continue;
+                      }
+                      events++;
+                      for (Map.Entry<String, Double> en : r.damage.entrySet()) {
+                          String k = en.getKey().toLowerCase();
+                          display.put(k, en.getKey());
+                          sum.merge(k, en.getValue(), Double::sum);
+                      }
+                  }
+                  if (events == 0 || sum.isEmpty()) {
+                      return "За последние " + logDays() + " дней данных нет.";
+                  }
+                  List<Map.Entry<String, Double>> list = new ArrayList<>(sum.entrySet());
+                  list.sort((a, b) -> Double.compare(b.getValue(), a.getValue()));
+                  StringBuilder sb = new StringBuilder("§eИвентов: §f" + events + "\n§eИгроков: §f" + list.size() + "\n\n");
+                  int n = 0;
+                  for (Map.Entry<String, Double> en : list) {
+                      n++;
+                      if (n > 50) {
+                          sb.append("§7... и ещё ").append(list.size() - 50);
+                          break;
+                      }
+                      sb.append("§e").append(n).append(". §f").append(display.get(en.getKey()))
+                              .append(" §7— §c").append((long) (double) en.getValue()).append("\n");
+                  }
+                  return sb.toString();
+              }
+
+              private String lastHitLogText() {
+                  long cutoff = System.currentTimeMillis() - logDays() * 86400000L;
+                  StringBuilder sb = new StringBuilder();
+                  int total = 0;
+                  for (int i = log.size() - 1; i >= 0; i--) {
+                      Rec r = log.get(i);
+                      if (r.time < cutoff || !r.killed || r.lastHitter == null) {
+                          continue;
+                      }
+                      total++;
+                      if (total <= 50) {
+                          sb.append("§7").append(fmtTime(r.time)).append(" §f— §e").append(r.lastHitter).append("\n");
+                      }
+                  }
+                  if (total == 0) {
+                      return "За последние " + logDays() + " дней босса не убивали.";
+                  }
+                  return "§eУбийств босса: §f" + total + "\n\n" + sb;
+              }
+
+              // ------------------------------------------------------------------ command
+
+              @Override
+              public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+                  if (command.getName().equalsIgnoreCase("aboss")) {
+                      if (!sender.hasPermission("eclips.boss.admin")) {
+                          sender.sendMessage("§cНет прав.");
+                      } else if (sender instanceof Player) {
+                          openAdminMenu((Player) sender);
+                      } else {
+                          sender.sendMessage("§cТолько в игре.");
+                      }
+                      return true;
+                  }
+                  if (!command.getName().equalsIgnoreCase("boss")) {
+                      return false;
+                  }
+                  if (args.length == 0) {
+                      if (sender instanceof Player) {
+                          openMenu((Player) sender);
+                      } else {
+                          sender.sendMessage("/boss <start|stop|setspawn|sethome|reload|info>");
+                      }
+                      return true;
+                  }
+                  if (!sender.hasPermission("eclips.boss.admin")) {
+                      sender.sendMessage("§cНет прав.");
+                      return true;
+                  }
+                  String sub = args[0].toLowerCase();
+                  switch (sub) {
+                      case "start":
+                          if (openEvent(true)) {
+                              sender.sendMessage("§aИвент запущен, босс появился сразу.");
+                          } else {
+                              sender.sendMessage("§cНе удалось запустить (уже идёт или нет мира в конфиге).");
+                          }
+                          return true;
+                      case "stop":
+                          if (phase != PHASE_IDLE) {
+                              cancelEvent("§cИвент остановлен администратором.");
+                              sender.sendMessage("§aИвент остановлен.");
+                          } else {
+                              sender.sendMessage("§cСейчас ивента нет.");
+                          }
+                          return true;
+                      case "setspawn":
+                      case "sethome":
+                          if (!(sender instanceof Player)) {
+                              sender.sendMessage("§cТолько в игре.");
+                              return true;
+                          }
+                          Player p = (Player) sender;
+                          savePoint(p, sub.equals("setspawn") ? "spawn" : "respawn");
+                          sender.sendMessage(sub.equals("setspawn")
+                                  ? "§aТочка появления босса сохранена."
+                                  : "§aТочка возврата после смерти на ивенте сохранена.");
+                          return true;
+                      case "reload":
+                          reloadConfig();
+                          loadSettings();
+                          sender.sendMessage("§aКонфиг перезагружен.");
+                          return true;
+                      case "info":
+                          if (phase == PHASE_FIGHT && boss != null) {
+                              sender.sendMessage("§eБосс активен: §f" + (int) boss.getHealth() + "/" + boss.getMaxHealth()
+                                      + " HP, участников: " + damage.size());
+                          } else if (phase == PHASE_OPEN) {
+                              sender.sendMessage("§eТелепорт открыт, босс ещё не появился.");
+                          } else {
+                              sender.sendMessage("§7Ивента сейчас нет. Следующий: " + nextOpenText());
+                          }
+                          return true;
+                      default:
+                          sender.sendMessage("§e/boss <start|stop|setspawn|sethome|reload|info>");
+                          return true;
+                  }
+              }
+          }
+          EOF_JAVA
+
+      - name: Build with Maven
+        timeout-minutes: 9
+        run: mvn -B -Dmaven.artifact.threads=16 -Dmaven.wagon.http.retryHandler.count=3 -Daether.connector.connectTimeout=10000 -Daether.connector.requestTimeout=20000 clean package -f eclips-boss/pom.xml
+
+      - name: Save Maven cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.m2/repository
+          key: m2-eclips-boss-${{ github.run_id }}
+
+      - name: Upload jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: EclipsBoss
+          path: eclips-boss/target/EclipsBoss.jar
